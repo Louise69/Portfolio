@@ -1,0 +1,600 @@
+// ======================================================
+// 1. CONSTANTES
+// ======================================================
+const canvas = document.querySelector("#canvas-target");
+
+const THICKNESS = 60;
+const FALL_HEIGHT = 0;
+const SVG_WIDTH_AS_PERCENT_OF_CONTAINER_WIDTH = 0.0011;
+const PAGE_CONFIG = {
+  //home
+  home: {
+    selector:
+      "#matter-path-1, #matter-path-2-outer, #matter-path-2-inner, #matter-path-3, #matter-path-4-body, #matter-path-4-dot, #matter-path-5",
+    colorMap: {
+      "matter-path-1": "#00BA95",
+      "matter-path-2-outer": "#FFB81E",
+      "matter-path-2-inner": "#FFFBED",
+      "matter-path-3": "#0094DE",
+      "matter-path-4-body": "#FF5F35",
+      "matter-path-4-dot": "#FF5F35",
+      "matter-path-5": "#00BA95",
+    },
+    compoundPaths: {
+      "matter-path-2-outer": ["matter-path-2-outer", "matter-path-2-inner"],
+    },
+  },
+  //about me
+  about: {
+    selector:
+      "#about-path-1-outer, #about-path-1-inner, #about-path-2-outer, #about-path-2-inner",
+    colorMap: {
+      "about-path-1-outer": "#00BA95",
+      "about-path-1-inner": "#FFFBED",
+      "about-path-2-outer": "#00BA95",
+      "about-path-2-inner": "#FFFBED",
+    },
+    compoundPaths: {
+      "about-path-1-outer": ["about-path-1-outer", "about-path-1-inner"],
+      "about-path-2-outer": ["about-path-2-outer", "about-path-2-inner"],
+    },
+  },
+  //blog
+  blog: {
+    selector: "#blog-path-1, #blog-path-2, #blog-path-3, #blog-path-4",
+    colorMap: {
+      "blog-path-1": "#FF5F35",
+      "blog-path-2": "#0094DE",
+      "blog-path-3": "#FFB81E",
+      "blog-path-4": "#00BA95",
+    },
+    compoundPaths: {
+      "about-path-3": ["about-path-3", "about-path-4"], // exemple
+    },
+  },
+};
+const DEFAULT_BODY_OPTIONS = {
+  restitution: 0.5,
+  friction: 0,
+  frictionStatic: 0,
+  frictionAir: 0.02,
+  density: 0.001,
+  sleepThreshold: 30,
+};
+
+// ======================================================
+// 2. MODULES
+// ======================================================
+let Engine = Matter.Engine,
+  Render = Matter.Render,
+  Runner = Matter.Runner,
+  Bodies = Matter.Bodies,
+  Composite = Matter.Composite,
+  Mouse = Matter.Mouse,
+  MouseConstraint = Matter.MouseConstraint,
+  Body = Matter.Body,
+  Svg = Matter.Svg,
+  Vector = Matter.Vector,
+  Vertices = Matter.Vertices;
+
+// ======================================================
+// 3. INITIALISATION DU MOTEUR ET DU RENDERER
+// ======================================================
+// Création du moteur physique
+let engine = Engine.create();
+engine.timing.timeScale = 1;
+engine.enableSleeping = true;
+engine.world.gravity.y = 3;
+engine.positionIterations = 30; // Améliore la précision des collisions
+engine.velocityIterations = 10; // Améliore la précision des collisions
+
+// Création du renderer
+let render = Render.create({
+  canvas: canvas,
+  engine: engine,
+  options: {
+    background: "transparent",
+    wireframes: false,
+    showAngleIndicator: false,
+    showSleeping: false,
+  },
+});
+
+// ======================================================
+// 4. AJOUT DES CORPS STATIQUES (SOL, MURS, PLAFOND)
+// ======================================================
+let ground = Bodies.rectangle(0, 0, 0, 0, {
+  isStatic: true,
+  friction: 0,
+  frictionStatic: 0,
+  render: { visible: false },
+});
+let leftWall = Bodies.rectangle(0, 0, 0, 0, {
+  isStatic: true,
+  render: { visible: false },
+});
+let rightWall = Bodies.rectangle(0, 0, 0, 0, {
+  isStatic: true,
+  render: { visible: false },
+});
+
+Composite.add(engine.world, [ground, leftWall, rightWall]);
+
+// ======================================================
+// 5. LANCEMENT DE LA CRÉATION DE LA SCENE
+// ======================================================
+buildScene();
+
+// ======================================================
+// 6. FONCTIONS UTILES
+// ======================================================
+// Création des SVG dans le monde physique
+function createLettersFromSvg(path, x, y, scaleFactor, options = {}) {
+  let verts = Svg.pathToVertices(path, 5);
+  verts = Vertices.scale(verts, scaleFactor, scaleFactor);
+  const id = path.getAttribute("id");
+  const currentPage = getCurrentPage();
+  const config = PAGE_CONFIG[currentPage];
+  const color = config.colorMap[id] || "#000000";
+
+  const body = Bodies.fromVertices(
+    x,
+    y,
+    verts,
+    {
+      ...DEFAULT_BODY_OPTIONS,
+      render: {
+        fillStyle: color,
+        strokeStyle: color,
+        lineWidth: 1,
+        ...options.render,
+      },
+      ...options,
+    },
+    true
+  );
+  return body;
+}
+
+function buildScene() {
+  const currentPage = getCurrentPage();
+  const config = PAGE_CONFIG[currentPage];
+
+  const width = document.documentElement.clientWidth;
+  const height = document.documentElement.clientHeight;
+  render.canvas.width = width;
+  render.canvas.height = height;
+  render.options.width = width;
+  render.options.height = height;
+
+  recreateStaticBodies();
+
+  const paths = document.querySelectorAll(config.selector);
+  const totalPaths = paths.length;
+  const screenWidth = document.documentElement.clientWidth;
+  const margin = 0;
+  const usableWidth = screenWidth - margin * 2;
+  const spacing = usableWidth / totalPaths;
+  const offsetX = (screenWidth - usableWidth) / 2;
+  const initialY = FALL_HEIGHT;
+  let currentIndex = 0;
+
+  for (let i = 0; i < totalPaths; i++) {
+    let path = paths[i];
+    let id = path.getAttribute("id");
+    let xPosition = offsetX + spacing * currentIndex + spacing / 2;
+    const scaleFactor = getDynamicScaleFactor(path);
+
+    const compound = config.compoundPaths?.[id];
+
+    if (compound) {
+      const elements = compound.map((subId) =>
+        document.querySelector(`#${subId}`)
+      );
+      const parts = elements.map((el) =>
+        createLettersFromSvg(el, xPosition, initialY, scaleFactor)
+      );
+
+      const compoundBody = Body.create({
+        parts: parts.flat(),
+        ...DEFAULT_BODY_OPTIONS,
+      });
+
+      Body.rotate(compoundBody, (Math.random() - 0.5) * 0.4);
+      Composite.add(engine.world, compoundBody);
+
+      currentIndex++;
+      i += compound.length - 1; // sauter les suivants
+    } else if (!id.includes("inner")) {
+      let yPosition = id.endsWith("dot") ? initialY - 150 : initialY;
+      let body = createLettersFromSvg(path, xPosition, yPosition, scaleFactor);
+      Composite.add(engine.world, body);
+      currentIndex++;
+    }
+  }
+}
+
+// Supprimer tous les bodies
+function resetSvgBodies() {
+  Composite.allBodies(engine.world).forEach((body) => {
+    if (!body.isStatic) {
+      Composite.remove(engine.world, body);
+    }
+  });
+
+  requestAnimationFrame(() => buildScene());
+}
+
+function getDynamicScaleFactor(path) {
+  const bounds = path.getBBox();
+  const targetWidth = document.documentElement.clientWidth / 10;
+  const width = bounds.width || 100;
+  const scale = targetWidth / width;
+  return Math.max(0.01, Math.min(scale, 3));
+}
+
+// Détection page active
+function getCurrentPage() {
+  const path = window.location.pathname;
+  if (path.includes("about")) return "about";
+  if (path.includes("blog")) return "blog";
+  return "home";
+}
+
+function recreateStaticBodies() {
+  const width = document.documentElement.clientWidth;
+  const height = document.documentElement.clientHeight;
+  const wallHeight = height * 10;
+
+  Composite.remove(engine.world, ground);
+  Composite.remove(engine.world, leftWall);
+  Composite.remove(engine.world, rightWall);
+
+  ground = Bodies.rectangle(width / 2, 600 + THICKNESS / 2, width, THICKNESS, {
+    isStatic: true,
+    friction: 0,
+    frictionStatic: 0,
+    render: { visible: false },
+  });
+
+  leftWall = Bodies.rectangle(
+    -THICKNESS / 2,
+    height / 2,
+    THICKNESS,
+    wallHeight * 2,
+    {
+      isStatic: true,
+      render: { visible: false },
+    }
+  );
+
+  rightWall = Bodies.rectangle(
+    width + THICKNESS / 2,
+    height / 2,
+    THICKNESS,
+    wallHeight * 2,
+    {
+      isStatic: true,
+      render: { visible: false },
+    }
+  );
+
+  Composite.add(engine.world, [ground, leftWall, rightWall]);
+}
+
+function resizeCanvas() {
+  const width = document.documentElement.clientWidth;
+  const height = document.documentElement.clientHeight;
+
+  render.canvas.width = width;
+  render.canvas.height = height;
+  render.options.width = width;
+  render.options.height = height;
+
+  recreateStaticBodies();
+
+  clearTimeout(resizeCanvas._debounce);
+  resizeCanvas._debounce = setTimeout(() => {
+    resetSvgBodies();
+  }, 200);
+}
+
+// ======================================================
+// 7. Écouteur de redimensionnement de la fenêtre
+// ======================================================
+// Initialisation du canvas et gestion du redimensionnement
+window.addEventListener("resize", () => {
+  clearTimeout(buildScene._debounce);
+  buildScene._debounce = setTimeout(() => {
+    // Supprimer les anciens bodies
+    Composite.allBodies(engine.world).forEach((body) => {
+      if (!body.isStatic) {
+        Composite.remove(engine.world, body);
+      }
+    });
+    // Recréer tout
+    requestAnimationFrame(() => buildScene());
+  }, 200);
+});
+
+// ======================================================
+// 8. DÉMARRAGE DU RENDERER & DU RUNNER
+// ======================================================
+function gameLoop() {
+  Engine.update(engine, 1000 / 90);
+  Render.world(render);
+  requestAnimationFrame(gameLoop);
+}
+
+gameLoop();
+
+// ======================================================
+// 9. GESTION DES INTERACTIONS SOURIS
+// ======================================================
+let mouse = Mouse.create(render.canvas);
+let mouseConstraint = MouseConstraint.create(engine, {
+  mouse: mouse,
+  constraint: {
+    stiffness: 0.9,
+    render: { visible: false },
+  },
+});
+Composite.add(engine.world, mouseConstraint);
+
+// Sécurisation : cibler l'élément utilisé par Matter pour les interactions souris
+const mouseElement = mouseConstraint.mouse.element;
+const mouseWheelHandler = mouseConstraint.mouse.mousewheel;
+
+// Suppression des écouteurs qui bloquent le scroll
+["mousewheel", "DOMMouseScroll", "wheel"].forEach((eventType) => {
+  mouseElement.removeEventListener(eventType, mouseWheelHandler);
+});
+
+// Ajout d'un écouteur passif pour autoriser le scroll (UX et performance)
+mouseElement.addEventListener("wheel", () => {}, { passive: true });
+
+// ======================================================
+// 10. CURSEUR PERSONNALISÉ & TRAIL
+// ======================================================
+
+const CustomCursor = {
+  element: null,
+  hasMoved: false,
+
+  init() {
+    this.element = document.createElement("div");
+    this.element.id = "custom-cursor";
+    document.body.appendChild(this.element);
+
+    window.addEventListener("mousemove", (e) =>
+      this.update(e.clientX, e.clientY)
+    );
+    window.addEventListener("touchmove", (e) => {
+      const touch = e.touches[0];
+      this.update(touch.clientX, touch.clientY);
+    });
+
+    this.addHoverListeners();
+  },
+
+  update(x, y) {
+    this.element.style.top = `${y}px`;
+    this.element.style.left = `${x}px`;
+    if (!this.hasMoved) {
+      this.element.style.opacity = 1;
+      this.hasMoved = true;
+    }
+  },
+
+  addHoverListeners() {
+    const hoverTargets = document.querySelectorAll("button, a, .hover-target");
+
+    hoverTargets.forEach((el) => {
+      el.addEventListener("mouseenter", () => {
+        if (TrailCursor.canvas) {
+          TrailCursor.canvas.classList.add("hidden");
+        }
+        if (this.element) {
+          this.element.classList.add("hidden");
+        }
+      });
+
+      el.addEventListener("mouseleave", () => {
+        if (TrailCursor.canvas) {
+          TrailCursor.canvas.classList.remove("hidden");
+        }
+        if (this.element) {
+          this.element.classList.remove("hidden");
+        }
+      });
+    });
+  },
+};
+
+document.addEventListener("DOMContentLoaded", () => {
+  CustomCursor.init();
+});
+
+const TrailCursor = {
+  canvas: null,
+  context: null,
+  pointer: { x: window.innerWidth / 2, y: window.innerHeight / 2 },
+  trail: [],
+  trailDuration: 75, // ms
+
+  init() {
+    this.canvas = document.createElement("canvas");
+    this.canvas.classList.add("cursor-canvas");
+    this.canvas.style.cssText = `
+      position: fixed;
+      top: 0;
+      left: 0;
+      z-index: 9998;
+      pointer-events: none;
+      transition: opacity 0.15s ease;
+    `;
+    document.body.appendChild(this.canvas);
+
+    this.context = this.canvas.getContext("2d");
+    this.context.imageSmoothingEnabled = true;
+
+    this.resize();
+    this.addListeners();
+    this.animate();
+  },
+
+  resize() {
+    this.canvas.width = window.innerWidth * window.devicePixelRatio;
+    this.canvas.height = window.innerHeight * window.devicePixelRatio;
+    this.context.setTransform(1, 0, 0, 1, 0, 0);
+    this.context.scale(window.devicePixelRatio, window.devicePixelRatio);
+  },
+
+  addListeners() {
+    window.addEventListener("resize", () => this.resize());
+    window.addEventListener("mousemove", (e) =>
+      this.onPointerMove(e.clientX, e.clientY)
+    );
+    window.addEventListener("touchmove", (e) => {
+      const touch = e.touches[0];
+      this.onPointerMove(touch.clientX, touch.clientY);
+    });
+  },
+
+  onPointerMove(x, y) {
+    this.pointer.x = x;
+    this.pointer.y = y;
+    const now = performance.now();
+
+    // Évite d'empiler le même point
+    if (this.trail.length > 0) {
+      const last = this.trail[0];
+      if (last.x === x && last.y === y) return;
+    }
+
+    this.trail.unshift({ x, y, time: now });
+  },
+
+  drawTrail() {
+    if (this.canvas.classList.contains("hidden")) {
+      this.context.clearRect(
+        0,
+        0,
+        this.canvas.width / window.devicePixelRatio,
+        this.canvas.height / window.devicePixelRatio
+      );
+      return;
+    }
+
+    const ctx = this.context;
+    const now = performance.now();
+
+    this.trail = this.trail.filter((p) => now - p.time < this.trailDuration);
+    ctx.clearRect(
+      0,
+      0,
+      this.canvas.width / window.devicePixelRatio,
+      this.canvas.height / window.devicePixelRatio
+    );
+
+    if (this.trail.length < 2) return;
+
+    ctx.beginPath();
+    ctx.moveTo(this.trail[0].x, this.trail[0].y);
+
+    for (let i = 1; i < this.trail.length - 1; i++) {
+      const p1 = this.trail[i];
+      const p2 = this.trail[i + 1];
+      const midPointX = (p1.x + p2.x) / 2;
+      const midPointY = (p1.y + p2.y) / 2;
+      ctx.quadraticCurveTo(p1.x, p1.y, midPointX, midPointY);
+    }
+
+    const last = this.trail[this.trail.length - 1];
+    ctx.lineTo(last.x, last.y);
+
+    ctx.strokeStyle = "#FF5F35";
+    ctx.lineWidth = 20;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.stroke();
+  },
+
+  stop() {
+    if (animationFrameId) {
+      cancelAnimationFrame(animationFrameId);
+      animationFrameId = null;
+    }
+
+    if (this.canvas) {
+      this.canvas.classList.add("hidden");
+    }
+  },
+
+  animate() {
+    this.drawTrail();
+    animationFrameId = requestAnimationFrame(() => this.animate());
+  },
+};
+
+function startCursorEffects() {
+  CustomCursor.init();
+  TrailCursor.init();
+}
+
+if (document.readyState !== "loading") {
+  startCursorEffects();
+} else {
+  document.addEventListener("DOMContentLoaded", startCursorEffects);
+}
+
+// ======================================================
+// 11. ANIMATION DE TRANSITION DE PAGE
+// ======================================================
+
+document.addEventListener("DOMContentLoaded", function () {
+  const overlay = document.querySelector(".page-transition");
+
+  // Affiche l'overlay avec 100vh de hauteur
+  gsap.set(overlay, { display: "block", height: "100vh" });
+
+  // Animation de réduction de la hauteur
+  gsap.to(overlay, {
+    height: "0vh",
+    duration: 0.5,
+    ease: "power4.inOut",
+    onComplete: () => {
+      gsap.set(overlay, { display: "none" });
+    },
+  });
+});
+
+const overlay = document.querySelector(".page-transition");
+
+document.querySelectorAll("a[href]").forEach((link) => {
+  link.addEventListener("click", function (e) {
+    const href = this.getAttribute("href");
+
+    if (!href.startsWith("#") && !this.hasAttribute("target")) {
+      e.preventDefault();
+
+      // Arrêt de la trail
+      if (TrailCursor && typeof TrailCursor.stop === "function") {
+        TrailCursor.stop();
+      }
+
+      // Affiche l'overlay avec 0vh de hauteur
+      gsap.set(overlay, { display: "block", position: "fixed", height: "0vh" });
+
+      // Animation d'ouverture (0 → 100vh) avant redirection
+      gsap.to(overlay, {
+        height: "100vh",
+        duration: 0.5,
+        ease: "power4.inOut",
+        onComplete: () => {
+          window.location.href = href;
+        },
+      });
+    }
+  });
+});

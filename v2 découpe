@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Preview Matter.js Animation</title>
+  <style>
+    /* Plein écran sans marges */
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+    /* Conteneur de l'animation */
+    #home {
+      width: 100%;
+      height: 100%;
+      background: transparent;
+    }
+  </style>
+</head>
+<body>
+  <!-- Section cible pour Matter.js -->
+  <section id="home"></section>
+
+  <!-- Bibliothèques nécessaires -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/pathseg@1.2.1/pathseg.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/poly-decomp@0.3.0/build/decomp.min.js"></script>
+
+  <!-- Code Matter.js adapté -->
+  <script>
+  (function() {
+    let initialized = false;
+    async function init() {
+      const e = document.querySelector('#home');
+      if (!e || initialized) return;
+      initialized = true;
+      let t = 0, r = {};
+      function isSafari() {
+        const ua = navigator.userAgent.toLowerCase();
+        return ua.includes('safari') && !ua.includes('chrome') && !ua.includes('chromium');
+      }
+      async function loadSvgs() {
+        const baseUrl = 'https://odubu.design/svg/letters';
+        for (let key of ['o','d','u','b']) {
+          const resp = await fetch(`${baseUrl}/${key}.svg`);
+          r[key] = await resp.text();
+        }
+      }
+      await loadSvgs();
+      const color = '#FF5A2D';
+      const engine = Matter.Engine.create();
+      engine.world.gravity.y = 2;
+      const render = Matter.Render.create({
+        element: e,
+        engine: engine,
+        options: {
+          width: e.clientWidth,
+          height: e.clientHeight,
+          background: 'transparent',
+          wireframes: true,
+          showAngleIndicator: false
+        }
+      });
+      const runner = Matter.Runner.create();
+      let baseSize = ((window.innerWidth/5) + (window.innerHeight/5)) / 2;
+      const offsetX = isSafari() ? 0 : 80;
+      const stepX = (window.innerWidth - offsetX) / 5;
+      let posY = window.innerHeight/3;
+      if (posY < 350) posY = 350;
+      const bodies = [];
+
+      function addLetter(key, x, y, size, flip=false) {
+        const svgDoc = new DOMParser().parseFromString(r[key], 'image/svg+xml');
+        const path = svgDoc.querySelector('path');
+        const verts = Matter.Svg.pathToVertices(path, 5);
+        // compute bounds
+        const bounds = verts.reduce((b, p) => {
+          return {
+            minX: Math.min(b.minX, p.x),
+            maxX: Math.max(b.maxX, p.x),
+            minY: Math.min(b.minY, p.y),
+            maxY: Math.max(b.maxY, p.y)
+          };
+        }, {minX: Infinity, maxX:-Infinity, minY:Infinity, maxY:-Infinity});
+        const width = bounds.maxX - bounds.minX;
+        if (flip) verts.forEach(p => p.x = -p.x + width);
+        const scale = size / width;
+        const body = Matter.Bodies.fromVertices(
+          x + width/2 * scale,
+          y,
+          [verts],
+          {
+            friction: 0,
+            frictionAir: 0.0001,
+            restitution: 0.5,
+            render: { fillStyle: color, strokeStyle: color, lineWidth: 1 }
+          },
+          true
+        );
+        Matter.Body.scale(body, scale, scale);
+        bodies.push(body);
+        Matter.Composite.add(engine.world, body);
+      }
+
+      // Ajout des lettres suivantes
+      let currentX = offsetX + (1.3*baseSize)/2;
+      addLetter('d', currentX += stepX, posY-baseSize, baseSize);
+      addLetter('u', currentX += stepX, posY+baseSize/2, baseSize);
+      addLetter('d', currentX += stepX, posY-baseSize, baseSize, true);
+      addLetter('u', currentX += stepX-80, posY+baseSize/2, baseSize);
+
+      // Bordures invisibles
+      const width = e.clientWidth, height = e.clientHeight;
+      const walls = [
+        Matter.Bodies.rectangle(width/2, height+25, width*100, 50, { isStatic:true, render:{ visible:false }}),
+        Matter.Bodies.rectangle(width/2, -25, width*100, 50, { isStatic:true, render:{ visible:false }}),
+        Matter.Bodies.rectangle(-25, height/2, 50, height*5, { isStatic:true, render:{ visible:false }}),
+        Matter.Bodies.rectangle(width+25, height/2, 50, height*5, { isStatic:true, render:{ visible:false }})
+      ];
+      Matter.Composite.add(engine.world, walls);
+
+      // Interaction souris
+      const mouse = Matter.Mouse.create(render.canvas);
+      const mouseConstraint = Matter.MouseConstraint.create(engine, { mouse, constraint:{ stiffness:0.2, render:{ visible:false }}});
+      Matter.Composite.add(engine.world, mouseConstraint);
+      render.mouse = mouse;
+
+      Matter.Render.run(render);
+      Matter.Runner.run(runner, engine);
+
+      // Ajustement au redimensionnement
+      let lastWidth = e.clientWidth;
+      window.addEventListener('resize', ()=>{
+        render.canvas.width = e.clientWidth;
+        render.canvas.height = e.clientHeight;
+        const scaleX = e.clientWidth / lastWidth;
+        lastWidth = e.clientWidth;
+        walls.forEach(w=>Matter.Body.scale(w, scaleX, 1));
+        bodies.forEach(b=>{
+          if (!b.isStatic) Matter.Body.scale(b, scaleX, scaleX);
+        });
+      });
+    }
+    window.addEventListener('DOMContentLoaded', init);
+  })();
+  </script>
+</body>
+</html>

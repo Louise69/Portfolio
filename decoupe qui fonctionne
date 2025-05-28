@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Matter.js SVG Animation</title>
+  <script src="https://cdn.jsdelivr.net/npm/matter-js@0.19.0/build/matter.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/poly-decomp@0.3.0/build/decomp.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/pathseg@1.2.1/pathseg.min.js"></script>
+  <style>
+    body { margin: 0; overflow: hidden; }
+    #canvas { display: block; }
+  </style>
+</head>
+<body>
+  <canvas id="canvas"></canvas>
+  <script>
+    const { Engine, Render, Runner, Bodies, Composite, Svg, Vertices } = Matter;
+
+    // create physics engine
+    const engine = Engine.create();
+    engine.world.gravity.y = 1;
+
+    // setup canvas and renderer
+    const canvas = document.getElementById('canvas');
+    const render = Render.create({
+      canvas,
+      engine,
+      options: {
+        background: 'transparent',
+        wireframes: false
+      }
+    });
+    Render.run(render);
+    const runner = Runner.create();
+    Runner.run(runner, engine);
+
+    // resize helper
+    function resize() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+      render.bounds.max.x = canvas.width;
+      render.bounds.max.y = canvas.height;
+      render.options.width = canvas.width;
+      render.options.height = canvas.height;
+      Render.lookAt(render, { min: { x: 0, y: 0 }, max: { x: canvas.width, y: canvas.height } });
+    }
+
+    window.addEventListener('resize', resize);
+    resize(); // initial sizing
+
+    // SVG string
+    const svgString = `<svg xmlns="http://www.w3.org/2000/svg" width="346" height="375" viewBox="0 0 346 375"><path d="M215.66 0H345.9V368.664H219.878L215.66 348.651C201.423 362.344 171.368 374.984 138.149 374.984C52.2013 374.984 0 315.471 0 221.199C0 126.926 59.056 67.4129 139.203 67.4129C167.15 67.4129 196.678 76.3662 215.66 91.1128V0ZM215.66 221.199C215.66 189.599 200.369 168.532 174.532 168.532C149.222 168.532 133.403 189.599 133.403 221.199C133.403 253.325 149.222 273.865 175.059 273.865C200.369 273.865 215.66 253.325 215.66 221.199Z" fill="#FF5A2D"/></svg>`;
+
+    // parse and convert to vertices
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(svgString, 'image/svg+xml');
+    const path = doc.querySelector('path');
+    let rawVerts = Svg.pathToVertices(path, 15);
+
+    // scale raw verts
+    const scale = 2;
+    rawVerts = rawVerts.map(v => ({ x: v.x * scale, y: v.y * scale }));
+
+    // center offset
+    const offsetX = canvas.width / 2;
+    const offsetY = canvas.height / 2;
+
+    // create body from vertices (wrap in array)
+    const shape = Bodies.fromVertices(offsetX, offsetY, [rawVerts], {
+      friction: 0.1,
+      restitution: 0.8,
+      render: { fillStyle: '#FF5A2D', strokeStyle: '#C74300', lineWidth: 2 }
+    }, true);
+
+    // add boundaries and shape
+    Composite.add(engine.world, [
+      shape,
+      Bodies.rectangle(offsetX, canvas.height + 50, canvas.width * 2, 100, { isStatic: true }),
+      Bodies.rectangle(offsetX, -50, canvas.width * 2, 100, { isStatic: true }),
+      Bodies.rectangle(-50, offsetY, 100, canvas.height * 2, { isStatic: true }),
+      Bodies.rectangle(canvas.width + 50, offsetY, 100, canvas.height * 2, { isStatic: true })
+    ]);
+  </script>
+</body>
+</html>

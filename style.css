@@ -1,0 +1,72 @@
+/* ----------- Global Styles ----------- */
+body {
+  /* Font rendering optimizations */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: geometricPrecision;
+}
+
+select {
+  /* Remove native dropdown styling */
+  -webkit-appearance: none;
+  -moz-appearance: none;
+}
+
+/* ----------- Canvas Trail ----------- */
+.cursor-canvas {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 9998;
+  pointer-events: none;
+}
+
+.cursor-canvas.hidden {
+  opacity: 0;
+}
+
+/* ----------- Custom Cursor ----------- */
+#custom-cursor {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 20px;
+  height: 20px;
+  background-color: #ff5f35;
+  border-radius: 50%;
+  pointer-events: none;
+  transform: translate(-50%, -50%) scale(1);
+  z-index: 9999;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+#custom-cursor.hidden {
+  opacity: 0 !important; /*important car j'ai set l'opacity avec le js*/
+  transition: opacity 0.15s ease;
+}
+
+/* ----------- Faire disparaitre le curseur sur mobile ----------- */
+@media (pointer: coarse) {
+  #custom-cursor {
+    display: none;
+  }
+}
+
+::selection {
+  background-color: #0094de;
+  color: white;
+}
+
+::-moz-selection {
+  background-color: #0094de;
+  color: white;
+}
+
+/* ----------- Écran de transition ----------- */
+.page-transition {
+  display: block;
+  z-index: 10;
+}
